@@ -2,19 +2,16 @@ package org.koitharu.kotatsu.local.data
 
 import java.io.File
 import java.io.FilenameFilter
-import java.util.*
+import java.util.Locale
 
-class CbzFilter : FilenameFilter {
+object CbzFilter : FilenameFilter {
 
 	override fun accept(dir: File, name: String): Boolean {
 		return isFileSupported(name)
 	}
 
-	companion object {
-
-		fun isFileSupported(name: String): Boolean {
-			val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-			return ext == "cbz" || ext == "zip"
-		}
+	fun isFileSupported(name: String): Boolean {
+		val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+		return ext == "cbz" || ext == "zip"
 	}
 }

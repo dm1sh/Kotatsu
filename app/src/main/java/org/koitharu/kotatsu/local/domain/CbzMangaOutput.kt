@@ -1,10 +1,10 @@
 package org.koitharu.kotatsu.local.domain
 
 import androidx.annotation.WorkerThread
-import java.io.File
-import java.util.zip.ZipFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
 import okio.Closeable
 import org.koitharu.kotatsu.core.zip.ZipOutput
 import org.koitharu.kotatsu.local.data.MangaIndex
@@ -13,6 +13,8 @@ import org.koitharu.kotatsu.parsers.model.MangaChapter
 import org.koitharu.kotatsu.parsers.util.toFileNameSafe
 import org.koitharu.kotatsu.utils.ext.deleteAwait
 import org.koitharu.kotatsu.utils.ext.readText
+import java.io.File
+import java.util.zip.ZipFile
 
 class CbzMangaOutput(
 	val file: File,
@@ -119,38 +121,47 @@ class CbzMangaOutput(
 			return CbzMangaOutput(file, manga)
 		}
 
-		@WorkerThread
-		fun filterChapters(subject: CbzMangaOutput, idsToRemove: Set<Long>) {
-			ZipFile(subject.file).use { zip ->
-				val index = MangaIndex(zip.readText(zip.getEntry(ENTRY_NAME_INDEX)))
-				idsToRemove.forEach { id -> index.removeChapter(id) }
-				val patterns = requireNotNull(index.getMangaInfo()?.chapters).map {
-					index.getChapterNamesPattern(it)
-				}
-				val coverEntryName = index.getCoverEntry()
-				for (entry in zip.entries()) {
-					when {
-						entry.name == ENTRY_NAME_INDEX -> {
-							subject.output.put(ENTRY_NAME_INDEX, index.toString())
-						}
-						entry.isDirectory -> {
-							subject.output.addDirectory(entry.name)
-						}
-						entry.name == coverEntryName -> {
-							subject.output.copyEntryFrom(zip, entry)
-						}
-						else -> {
-							val name = entry.name.substringBefore('.')
-							if (patterns.any { it.matches(name) }) {
+		suspend fun filterChapters(subject: CbzMangaOutput, idsToRemove: Set<Long>) = withContext(Dispatchers.IO) {
+			try {
+				ZipFile(subject.file).use { zip ->
+					val index = MangaIndex(zip.readText(zip.getEntry(ENTRY_NAME_INDEX)))
+					idsToRemove.forEach { id -> index.removeChapter(id) }
+					val patterns = requireNotNull(index.getMangaInfo()?.chapters).map {
+						index.getChapterNamesPattern(it)
+					}
+					val coverEntryName = index.getCoverEntry()
+					for (entry in zip.entries()) {
+						ensureActive()
+						when {
+							entry.name == ENTRY_NAME_INDEX -> {
+								subject.output.put(ENTRY_NAME_INDEX, index.toString())
+							}
+
+							entry.isDirectory -> {
+								subject.output.addDirectory(entry.name)
+							}
+
+							entry.name == coverEntryName -> {
 								subject.output.copyEntryFrom(zip, entry)
+							}
+
+							else -> {
+								val name = entry.name.substringBefore('.')
+								if (patterns.any { it.matches(name) }) {
+									subject.output.copyEntryFrom(zip, entry)
+								}
 							}
 						}
 					}
+					subject.output.finish()
+					subject.output.close()
+					subject.file.delete()
+					subject.output.file.renameTo(subject.file)
 				}
-				subject.output.finish()
+			} catch (e: Throwable) {
 				subject.output.close()
-				subject.file.delete()
-				subject.output.file.renameTo(subject.file)
+				subject.output.file.delete()
+				throw e
 			}
 		}
 	}
