@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.mapNotNull
-import kotlinx.coroutines.flow.toSet
+import kotlinx.coroutines.flow.toCollection
 import kotlinx.coroutines.runInterruptible
 import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.local.data.LocalMangaStorage
@@ -22,6 +22,7 @@ import org.koitharu.kotatsu.parsers.model.MangaTag
 import org.koitharu.kotatsu.parsers.model.SortOrder
 import org.koitharu.kotatsu.utils.AlphanumComparator
 import org.koitharu.kotatsu.utils.CompositeMutex
+import org.koitharu.kotatsu.utils.PopularitySet
 import org.koitharu.kotatsu.utils.ext.asArrayList
 import org.koitharu.kotatsu.utils.ext.deleteAwait
 import java.io.File
@@ -122,7 +123,7 @@ class LocalMangaRepository @Inject constructor(
 	override suspend fun getTags(): Set<MangaTag> = storage.getAllFiles()
 		.mapNotNull { file -> storage.getMangaInfo(file) }
 		.flatMapConcat { it.tags.asFlow() }
-		.toSet()
+		.toCollection(PopularitySet())
 
 	suspend fun getOutputDir(): File? {
 		return storageManager.getDefaultWriteableDir()

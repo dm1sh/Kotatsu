@@ -4,14 +4,17 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.asFlow
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.io.IOException
-import java.util.*
-import javax.inject.Inject
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.R
 import org.koitharu.kotatsu.base.ui.widgets.ChipsView
 import org.koitharu.kotatsu.core.prefs.AppSettings
@@ -20,7 +23,11 @@ import org.koitharu.kotatsu.history.domain.HistoryRepository
 import org.koitharu.kotatsu.history.domain.PROGRESS_NONE
 import org.koitharu.kotatsu.list.domain.ListExtraProvider
 import org.koitharu.kotatsu.list.ui.MangaListViewModel
-import org.koitharu.kotatsu.list.ui.model.*
+import org.koitharu.kotatsu.list.ui.model.EmptyState
+import org.koitharu.kotatsu.list.ui.model.ListHeader2
+import org.koitharu.kotatsu.list.ui.model.LoadingState
+import org.koitharu.kotatsu.list.ui.model.toErrorState
+import org.koitharu.kotatsu.list.ui.model.toUi
 import org.koitharu.kotatsu.local.domain.LocalMangaRepository
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaTag
@@ -30,6 +37,9 @@ import org.koitharu.kotatsu.utils.SingleLiveEvent
 import org.koitharu.kotatsu.utils.ext.asLiveDataDistinct
 import org.koitharu.kotatsu.utils.ext.printStackTraceDebug
 import org.koitharu.kotatsu.utils.ext.runCatchingCancellable
+import java.io.IOException
+import java.util.LinkedList
+import javax.inject.Inject
 
 @HiltViewModel
 class LocalListViewModel @Inject constructor(
@@ -45,6 +55,7 @@ class LocalListViewModel @Inject constructor(
 	private val mangaList = MutableStateFlow<List<Manga>?>(null)
 	private val selectedTags = MutableStateFlow<Set<MangaTag>>(emptySet())
 	private var refreshJob: Job? = null
+	private val tagsDeferred = viewModelScope.async(Dispatchers.Default) { getTagsSafe() }
 
 	override val content = combine(
 		mangaList,
@@ -66,7 +77,7 @@ class LocalListViewModel @Inject constructor(
 			)
 
 			else -> buildList(list.size + 1) {
-				add(createHeader(list, tags, order))
+				add(createHeader(tags, order))
 				list.toUi(this, mode, this@LocalListViewModel)
 			}
 		}
@@ -150,16 +161,10 @@ class LocalListViewModel @Inject constructor(
 		}
 	}
 
-	private fun createHeader(mangaList: List<Manga>, selectedTags: Set<MangaTag>, order: SortOrder): ListHeader2 {
-		val tags = HashMap<MangaTag, Int>()
-		for (item in mangaList) {
-			for (tag in item.tags) {
-				tags[tag] = tags[tag]?.plus(1) ?: 1
-			}
-		}
-		val topTags = tags.entries.sortedByDescending { it.value }.take(6)
+	private suspend fun createHeader(selectedTags: Set<MangaTag>, order: SortOrder): ListHeader2 {
+		val tags = tagsDeferred.await()?.take(6).orEmpty()
 		val chips = LinkedList<ChipsView.ChipModel>()
-		for ((tag, _) in topTags) {
+		for (tag in tags) {
 			val model = ChipsView.ChipModel(
 				icon = 0,
 				title = tag.title,
@@ -191,4 +196,8 @@ class LocalListViewModel @Inject constructor(
 			PROGRESS_NONE
 		}
 	}
+
+	private suspend fun getTagsSafe() = runCatchingCancellable {
+		repository.getTags()
+	}.getOrNull()
 }
